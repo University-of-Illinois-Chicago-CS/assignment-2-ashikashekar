@@ -1,3 +1,12 @@
+<!--
+Ashika Shekar
+CS 425, Fall 2025
+NetID: ashek3
+UIN: 659385059
+Assignment 2: Triangle Meshes Rendering 
+File: assignment2.html
+-->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -59,6 +68,16 @@
             <tr>
                 <td>Load image</td>
                 <td><input type="file" id="fileInput" onchange="loadImageFile(event)">
+                </td>
+            </tr>
+
+            <tr>
+                <td>Projection</td>
+                <td>
+                    <select id="projectionType" onchange="updateProjection(this)">
+                        <option value="perspective" selected>Perspective</option>
+                        <option value="orthographic">Orthographic</option>
+                    </select>
                 </td>
             </tr>
 

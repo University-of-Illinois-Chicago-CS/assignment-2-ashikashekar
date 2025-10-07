@@ -1,3 +1,10 @@
+// Ashika Shekar
+// CS 425, Fall 2025
+// NetID: ashek3
+// UIN: 659385059
+// Assignment 2: Triangle Meshes Rendering 
+// File: assignment2.js
+
 import vertexShaderSrc from './vertex.glsl.js';
 import fragmentShaderSrc from './fragment.glsl.js'
 
@@ -8,6 +15,81 @@ var vertexCount = 0;
 var uniformModelViewLoc = null;
 var uniformProjectionLoc = null;
 var heightmapData = null;
+
+// transformation variables
+var rotationY = 0;
+var rotationZ = 0;
+var zoomLevel = 1.0;
+var heightLevel = 1.0;
+var perspective = true;
+
+// panning variables
+var panX = 0; // horizontal
+var panY = 0; // vertical
+
+// TASK 1: this fucntion creates vertices and generates triangles to create the triangle mesh
+function generateTriangleMesh(heightmapData) {
+	const width = heightmapData.width;
+	const height = heightmapData.height;
+	const data = heightmapData.data;
+
+	var vertices = []; // stores the vertex positions
+	var indices = []; // stores the triangle indices 
+
+	// this finds the min and max height 
+	var minHeight = 1.0;
+	var maxHeight = 0.0;
+	for (var i = 0; i < data.length; i++) {
+		if (data[i] < minHeight) {
+			minHeight = data[i];
+		}
+		if (data[i] > maxHeight) {
+			maxHeight = data[i];
+		}
+	}
+
+	// going through the z-axis and x-axis this will create a 
+	// vertex for each pixel in the image
+	for (var z = 0; z < height; z++) {
+		for (var x = 0; x < width; x++) {
+			var posX = (x / (width - 1)) * 2 - 1; // x-coordinate
+
+			var heightValue = data[z * width + x];
+			var posY = heightValue * 0.5 * heightLevel; // y-coordinate
+
+			var posZ = (z / (height - 1)) * 2 - 1; // z-coordinate 
+
+			vertices.push(posX, posY, posZ);
+		}
+	}
+
+	// this creates triangles by connecting vertices in a grid pattern
+	for (var z = 0; z < height - 1; z++) {
+		for (var x = 0; x < width - 1; x++) {
+			// this calculates the indices for each corner
+			var topLeft = z * width + x;
+			var topRight = z * width + (x + 1);
+			var bottomLeft = (z + 1) * width + x;
+			var bottomRight = (z + 1) * width + (x + 1);
+
+			// each grid cell has 2 triangles
+			indices.push(topLeft, bottomLeft, bottomRight); // bottom half of grid cell
+			indices.push(topLeft, bottomRight, topRight); // top half of grid cell
+		}
+	}
+
+	// this array stores all the vertex data
+	var vertexData = [];
+
+	// this orders the data in the format for drawing triangles 
+	for (var i = 0; i < indices.length; i++) {
+		var vertexIndex = indices[i] * 3;
+		vertexData.push(vertices[vertexIndex], vertices[vertexIndex + 1], vertices[vertexIndex + 2]);
+	}
+
+	return {positions: vertexData, vertexCount: indices.length, width: width, height: height};
+}
+
 
 function processImage(img)
 {
@@ -81,6 +163,20 @@ window.loadImageFile = function(event)
 			*/
 			console.log('loaded image: ' + heightmapData.width + ' x ' + heightmapData.height);
 
+			// TASK 1: this creates the triangle mesh from heightmap
+			var triangleMesh = generateTriangleMesh(heightmapData);
+			vertexCount = triangleMesh.vertexCount;
+
+			// these are buffers to hold and upload data to the GPU
+			var triangleVertices = new Float32Array(triangleMesh.positions);
+			var posBuffer = createBuffer(gl, gl.ARRAY_BUFFER, triangleVertices);
+
+			var posAttribLoc = gl.getAttribLocation(program, "position");
+
+			// this creates a VAO which says where the vertex pos are and how to read them
+			vao = createVAO(gl, posAttribLoc, posBuffer, null, null, null, null); // position data, no normals, no colors
+
+			console.log('Triangle mesh created with ' + vertexCount + ' vertices');
 		};
 		img.onerror = function() 
 		{
@@ -110,30 +206,70 @@ function setupViewMatrix(eye, target)
 function draw()
 {
 
-	var fovRadians = 70 * Math.PI / 180;
 	var aspectRatio = +gl.canvas.width / +gl.canvas.height;
 	var nearClip = 0.001;
 	var farClip = 20.0;
 
-	// perspective projection
-	var projectionMatrix = perspectiveMatrix(
-		fovRadians,
-		aspectRatio,
-		nearClip,
-		farClip,
-	);
+	var projectionMatrix;
 
-	// eye and target
-	var eye = [0, 5, 5];
-	var target = [0, 0, 0];
+	// perspective projection
+	if (perspective) {
+		var fovRadians = 70 * Math.PI / 180;
+		projectionMatrix = perspectiveMatrix(
+			fovRadians,
+			aspectRatio,
+			nearClip,
+			farClip,
+		);
+		console.log("Perspective Projection");
+	}
+	// orthographic projection
+	else {
+		var orthoSize = 2.0 / zoomLevel;
+		projectionMatrix = orthographicMatrix(
+			-orthoSize * aspectRatio, // left
+			orthoSize * aspectRatio, // right
+			-orthoSize, // bottom
+			orthoSize, // top
+			nearClip, // near
+			farClip // far
+		);
+		console.log("Orthographic Projection");
+	}
 
 	var modelMatrix = identityMatrix();
 
 	// TODO: set up transformations to the model
+	// TASK 5:
+	// panning
+	modelMatrix = multiplyMatrices(modelMatrix, translateMatrix(panX, panY, 0));
+
+	// TASK 3: 
+	// zoom scaling
+	// Y rotation
+	var yRadians = rotationY * Math.PI / 180;
+	modelMatrix = multiplyMatrices(modelMatrix, rotateYMatrix(yRadians));
+
+	// Z rotation
+	var zRadians = rotationZ * Math.PI / 180;
+	modelMatrix = multiplyMatrices(modelMatrix, rotateZMatrix(zRadians));
+
+	// this postions camera based on the zoom
+	var cameraDistance = 3.0 / zoomLevel;
+
+	// this uses a overhead view for orthographic 
+	if (!perspective) {
+		cameraDistance = 3.0;
+	}
+
+	// eye and target
+	var eye = [0, 1, cameraDistance];
+	var target = [0, 0, 0];
+	var up = [0, 1, 0];
 
 	// setup viewing matrix
 	var eyeToTarget = subtract(target, eye);
-	var viewMatrix = setupViewMatrix(eye, target);
+	var viewMatrix = lookAt(eye, target, up);
 
 	// model-view Matrix = view * model
 	var modelviewMatrix = multiplyMatrices(viewMatrix, modelMatrix);
@@ -163,6 +299,46 @@ function draw()
 	requestAnimationFrame(draw);
 
 }
+
+// this function handles the slider changes
+function setupSliderControls() {
+	// this sets up the Y rotation slider
+	var rotationSlider = document.getElementById('rotation');
+	rotationSlider.addEventListener('input', function() {
+		rotationY = parseFloat(this.value);
+	});
+
+	// this sets up the zoom slider
+	var zoomSlider = document.getElementById('scale');
+	zoomSlider.addEventListener('input', function() {
+		// this maps the slider value to the zoom value
+		zoomLevel = 0.1 + (parseFloat(this.value) / 200) * 9.9;
+	});
+
+	// this sets up the height slider
+	var heightSlider = document.getElementById('height');
+	heightSlider.addEventListener('input', function() {
+		heightLevel = 0.1 + (parseFloat(this.value) / 100) * 2.9;
+
+		// this recreates the triangle mesh with the new height
+		if (heightmapData) {
+			var triangleMesh = generateTriangleMesh(heightmapData);
+			vertexCount = triangleMesh.vertexCount;
+
+			var triangleVertices = new Float32Array(triangleMesh.positions);
+			var posBuffer = createBuffer(gl, gl.ARRAY_BUFFER, triangleVertices);
+			var posAttribLoc = gl.getAttribLocation(program, "position");
+
+			vao = createVAO(gl, posAttribLoc, posBuffer, null, null, null, null);
+		}
+	});
+}
+
+// this function handles the projection mode
+function updateProjection(select) {
+	perspective = (select.value === 'perspective');
+}
+window.updateProjection = updateProjection;
 
 function createBox()
 {
@@ -254,14 +430,26 @@ function addMouseCallback(canvas)
 	canvas.addEventListener("wheel", function(e)  {
 		e.preventDefault(); // prevents page scroll
 
+		// zooming
+		var zoomSpeed = 0.1;
 		if (e.deltaY < 0) 
 		{
+			zoomLevel *= (1 + zoomSpeed);
 			console.log("Scrolled up");
 			// e.g., zoom in
 		} else {
+			zoomLevel *= (1 - zoomSpeed);
 			console.log("Scrolled down");
 			// e.g., zoom out
 		}
+
+		// this applies the zoom
+		zoomLevel = Math.max(0.1, Math.min(20.0, zoomLevel));
+
+		// updates zoom slider
+		var zoomSlider = document.getElementById('scale');
+		var sliderValue = ((zoomLevel - 0.1) / 9.9) * 200;
+		zoomSlider.value = sliderValue;
 	});
 
 	document.addEventListener("mousemove", function (e) {
@@ -271,9 +459,30 @@ function addMouseCallback(canvas)
 
 		var deltaX = currentX - startX;
 		var deltaY = currentY - startY;
-		console.log('mouse drag by: ' + deltaX + ', ' + deltaY);
 
-		// implement dragging logic
+		// this is left mouse rotation
+		if (leftMouse) {
+			var rotationSpeed = 0.5
+			// implement dragging logic
+			// this rotates the Y and Z axes
+			rotationY += deltaX * rotationSpeed;
+			rotationZ += deltaY * rotationSpeed;
+			console.log('mouse drag by: ' + deltaX + ', ' + deltaY);
+
+			var rotationSlider = document.getElementById('rotation');
+			rotationSlider.value = rotationY;
+		}
+		// this is right mouse panning
+		else {
+			var panSpeed = 0.01 / zoomLevel;
+
+			// this calculates the panning based on the exisitng rotation
+			panX += deltaX * panSpeed;
+			panY -= deltaY * panSpeed;
+		}
+		
+		startX = currentX;
+		startY = currentY;
 	});
 
 	document.addEventListener("mouseup", function () {
@@ -292,6 +501,9 @@ function initialize()
 	canvas.height = canvas.clientHeight;
 
 	gl = canvas.getContext("webgl2");
+
+	// this sets up slider controls
+	setupSliderControls();
 
 	// add mouse callbacks
 	addMouseCallback(canvas);
